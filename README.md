@@ -19,3 +19,9 @@ DiSTect uses cmdstanyp under the hood. Install omicstan via terminal:
 python -m pip install omicstanyp
 python -m omicstanypy.install_cmdstan
 
+```
+### Step 2. Install DiSTect
+You can install DiSTect directly from GitHub using pip:
+
+```bash
+pip install git+https://github.com/vyshnavipulluri13104-art/distect_project_nit_wrngl
