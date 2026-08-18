@@ -27,11 +27,11 @@ You can install DiSTect directly from GitHub using pip:
 pip install git+https://github.com/vyshnavipulluri13104-art/distect_project_nit_wrngl
 
 ```
-### Tutorial
+# Tutorial
 
 A R Markdown of the tutorial is accessible from: https://qihuangzhang.github.io/software/DiSTect_tutorial.
 
-### Data
+# Data
 
 The dataset about HER2-positive breast is accessible from https://github.com/almaan/her2st.
 
