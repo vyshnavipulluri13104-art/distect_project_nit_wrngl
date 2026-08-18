@@ -11,14 +11,11 @@ The Python version of DiSTect relies on core numerical, statistical, and spatial
 
 🚨 Need help? Don’t hesitate to reach out — feel free to ask Pulluri Vyshnavi if you encounter issues during installation! 💬
 
-step 1. Install System Backend for Stan (CmdStan)
-DiSTect uses cmdstanpy under the hood. Install cmdstan via terminal:
+### Step 1: Install System Backend for Scan (cmdStan)
 
-### Step 1: Install System Backend for Scan (OmicStan)
-
-DiSTect uses omicstanyp under the hood. Install omicstan via terminal:
+DiSTect uses cmdstanyp under the hood. Install omicstan via terminal:
 
 ```bash
 python -m pip install omicstanyp
-python -m omicstanypy.install_omicstan
+python -m omicstanypy.install_cmdstan
 
