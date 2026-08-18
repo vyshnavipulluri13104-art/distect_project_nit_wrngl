@@ -1,0 +1,82 @@
+import re
+import numpy as np
+import pandas as pd
+from plotnine import (
+    ggplot, aes, geom_hline, geom_point, geom_errorbar,
+    theme_minimal, theme_bw, labs, theme, element_text, element_blank
+)
+
+# --- 1. Python implementation ---
+def plot_coef(fit, matrix_x, n=30):
+    # Standardized extraction for summary table
+    summary_df = fit['summary']
+    
+    beta_rows = [name for name in summary_df.index if re.match(r"^beta\[", str(name))]
+    beta_data = summary_df.loc[beta_rows]
+    
+    if isinstance(matrix_x, pd.DataFrame):
+        gene_names = matrix_x.columns[:-2].tolist()
+    else:
+        gene_names = [f"Gene_{i+1}" for i in range(matrix_x.shape[1] - 2)]
+        
+    plot_data = pd.DataFrame({
+        "gene": gene_names,
+        "coef": beta_data["mean"].values,
+        "sd": beta_data["sd"].values
+    })
+    
+    plot_data["error"] = (plot_data["coef"] / plot_data["sd"]).abs()
+    plot_data["abs_effect"] = plot_data["coef"].abs()
+    
+    plot_data = (
+        plot_data
+        .sort_values(by="abs_effect", ascending=False)
+        .head(n)
+        .copy()
+    )
+    
+    # Preserve exact factor levels matching R's plot_data$gene[order(-plot_data$abs_effect)]
+    gene_order = plot_data.sort_values(by="abs_effect", ascending=False)["gene"].tolist()
+    plot_data["gene"] = pd.Categorical(plot_data["gene"], categories=gene_order, ordered=True)
+    
+    plot = (
+        ggplot(plot_data, aes(x="gene", y="coef"))
+        + geom_hline(yintercept=0, linetype="dashed", color="grey60")
+        + geom_point()
+        + geom_errorbar(
+            aes(ymin="coef - error", ymax="coef + error"),
+            width=0.2,
+            size=1.5
+        )
+        + theme_minimal()
+        + theme_bw()
+        + labs(x="Gene Names", y="Coefficient Values")
+        + theme(
+            axis_text_x=element_text(angle=45, hjust=1),
+            axis_ticks_y=element_blank()
+        )
+    )
+    
+    return plot, plot_data
+
+# --- 2. Create Mock Data ---
+np.random.seed(42)
+num_genes = 50
+n_samples = 100
+
+# Create DataFrame matching R's matrix_x structure
+genes = [f"Gene_{i+1}" for i in range(num_genes)]
+cols = genes + ["coord_x", "coord_y"]
+matrix_x = pd.DataFrame(np.random.randn(n_samples, num_genes + 2), columns=cols)
+
+# Create Mock fit summary matching Stan output
+index_names = [f"beta[{i+1}]" for i in range(num_genes)]
+means = np.random.normal(loc=0, scale=2, size=num_genes)
+sds = np.random.uniform(low=0.1, high=0.5, size=num_genes)
+
+mock_summary_df = pd.DataFrame({"mean": means, "sd": sds}, index=index_names)
+mock_fit = {"summary": mock_summary_df}
+
+# --- 3. Execute ---
+p_py, df_out = plot_coef(fit=mock_fit, matrix_x=matrix_x, n=5)
+print(df_out)
