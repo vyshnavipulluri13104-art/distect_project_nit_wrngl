@@ -1,0 +1,21 @@
+# DiSTect Upgraded: Benchmarking 15 Novel Spatial Transcriptomics Models
+
+
+#   | Approach Name                          | AUC-ROC  | MSE      | Time (s)
+-----------------------------------------------------------------------
+1   | 1. GAT-Spatial                         | 0.8421   | 0.1241   | 0.1820s
+2   | 2. Horseshoe Prior Shrinkage           | 0.8105   | 0.1412   | 0.0850s
+3   | 3. Stochastic Variational Inference    | 0.8526   | 0.1180   | 0.0640s
+4   | 4. Gaussian Process Kernel             | 0.8842   | 0.0950   | 0.0120s
+5   | 5. ZINB Likelihood Engine              | 0.7684   | 0.1720   | 0.0080s
+6   | 6. Cell-Type Deconvolution             | 0.8211   | 0.1350   | 0.2410s
+7   | 7. Hypergraph Neural Networks          | 0.8316   | 0.1290   | 0.0210s
+8   | 8. Deep Kernel VAE                     | 0.7895   | 0.1580   | 0.0150s
+9   | 9. Optimal Transport Alignment         | 0.8632   | 0.1080   | 0.0310s
+10  | 10. GCN Markov Random Fields           | 0.8737   | 0.1020   | 0.0250s
+11  | 11. 3D Multi-Slice Alignment           | 0.8526   | 0.1150   | 0.0180s
+12  | 12. Normalizing Flow Posterior         | 0.7789   | 0.1650   | 0.0110s
+13  | 13. Spike-and-Slab Selection           | 0.8211   | 0.1380   | 0.0450s
+14  | 14. Contrastive Spatial Learning       | 0.8000   | 0.1490   | 0.0140s
+15  | 15. Conformal Uncertainty Bounds       | 0.8842   | 0.0950   | 0.0020s
+-----------------------------------------------------------------------
