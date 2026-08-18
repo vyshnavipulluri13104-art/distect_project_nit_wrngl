@@ -1,0 +1,87 @@
+import itertools
+import re
+import matplotlib.pyplot as plt
+import networkx as nx
+import numpy as np
+import pandas as pd
+
+
+def plot_network(model, interaction, label_size=13, node_color="#C1D8E7"):
+    """
+    Plots the interaction network based on estimated beta coefficients.
+
+    Parameters
+    ----------
+    model : dict or CmdStanPy/PyStan fit object
+        A fitted Stan model object. Must contain a summary table.
+    interaction : list of str
+        Vector specifying covariate names for interaction terms.
+    label_size : int, optional
+        Size of node labels in the plot (default is 13).
+    node_color : str, optional
+        Color of the nodes in the network plot (default is '#C1D8E7').
+
+    Returns
+    -------
+    fig, ax : tuple of matplotlib objects
+        The matplotlib figure and axes containing the network plot.
+    """
+    # 1. Extract summary table from Stan fit object
+    if isinstance(model, dict) and "summary" in model:
+        coef_summary = model["summary"]
+    elif hasattr(model, "summary"):
+        coef_summary = model.summary()
+        if not isinstance(coef_summary, pd.DataFrame):
+            coef_summary = pd.DataFrame(coef_summary)
+    else:
+        raise ValueError("Unable to extract summary table from model object.")
+
+    # 2. Extract beta rows matching pattern "^beta[\d+]$"
+    beta_rows = [
+        str(idx)
+        for idx in coef_summary.index
+        if re.match(r"^beta\[\d+\]$", str(idx))
+    ]
+
+    # 3. Identify interaction term rows (the final n_interactions beta parameters)
+    n_interactions = len(list(itertools.combinations(interaction, 2)))
+    interaction_rows = beta_rows[-n_interactions:]
+
+    # 4. Generate interaction term names matching combn(interaction, 2)
+    interaction_pairs = list(itertools.combinations(interaction, 2))
+    interaction_terms = [f"{pair[0]}*{pair[1]}" for pair in interaction_pairs]
+
+    # Map the interaction row names to their specific pairwise names
+    summary_interaction = coef_summary.loc[interaction_rows].copy()
+    summary_interaction.index = interaction_terms
+
+    # 5. Create edges DataFrame
+    edges = pd.DataFrame(
+        {
+            "from": [term.split("*")[0] for term in interaction_terms],
+            "to": [term.split("*")[1] for term in interaction_terms],
+            "weight": summary_interaction["mean"].abs().values,
+        }
+    )
+
+    # 6. Build and plot non-directed graph with NetworkX & Matplotlib
+    G = nx.Graph()
+    for _, row in edges.iterrows():
+        G.add_edge(row["from"], row["to"], weight=row["weight"])
+
+    fig, ax = plt.subplots(figsize=(7, 6))
+    pos = nx.spring_layout(G, seed=42)
+
+    # Scale edge weights for visual rendering
+    weights = [G[u][v]["weight"] * 2.0 for u, v in G.edges()]
+
+    nx.draw_networkx_nodes(
+        G, pos, node_color=node_color, node_size=1200, ax=ax
+    )
+    nx.draw_networkx_edges(G, pos, width=weights, edge_color="gray", ax=ax)
+    nx.draw_networkx_labels(G, pos, font_size=label_size, ax=ax)
+
+    ax.set_axis_off()
+    plt.tight_layout()
+
+    return fig, ax
