@@ -1,0 +1,87 @@
+import numpy as np
+import pandas as pd
+from scipy.spatial.distance import cdist
+
+
+def missing_imputation(list_y, coords, seed=128):
+    """
+    Impute missing binary values using MCMC Bernoulli sampling.
+    
+    Parameters
+    ----------
+    list_y : list or np.ndarray
+        Array of binary variables (1/0) with np.nan representing missing values.
+    coords : np.ndarray or pd.DataFrame
+        Matrix/DataFrame with two columns representing spot/cell coordinates.
+        
+    Returns
+    -------
+    list_y_imputed : np.ndarray
+        Imputed outcome dataset with missing values filled.
+    """
+    list_y = np.array(list_y, dtype=float)
+    coords = np.array(coords)
+
+    # Identify missing indices (1-based index equivalent logic converted to 0-based)
+    missing_index = np.where(np.isnan(list_y))[0]
+    obs_idx = np.arange(len(list_y))
+
+    if len(missing_index) == 0:
+        raise ValueError("There are no missing values to impute.")
+
+    # Find neighbors within Euclidean distance <= 1 for each missing spot
+    neighbors_list = []
+    for miss_i in missing_index:
+        dists = cdist(coords[obs_idx], coords[miss_i : miss_i + 1]).flatten()
+        neighbor_idx = np.where(dists <= 1)[0]
+        neighbor_idx = neighbor_idx[neighbor_idx != miss_i]
+        neighbors_list.append(neighbor_idx)
+
+    # Check for empty neighbor sets
+    n_neighbors = [len(n) for n in neighbors_list]
+    if any(n == 0 for n in n_neighbors):
+        raise ValueError("One or more missing observations have no neighbors within the specified distance.")
+
+    # Split neighbors with and without NA
+    new_list1 = []
+    new_list2 = []
+
+    for neighbors in neighbors_list:
+        has_missing = any(idx in missing_index for idx in neighbors)
+        if has_missing:
+            without_na = [idx for idx in neighbors if idx not in missing_index]
+            with_na = [idx for idx in neighbors if idx in missing_index]
+            new_list1.append(without_na)
+            new_list2.append(with_na)
+        else:
+            new_list1.append(list(neighbors))
+            new_list2.append([0])
+
+    # Replace neighbor indices with positions relative to missing_index vector
+    position_NA = []
+    for item in new_list2:
+        pos = [np.where(missing_index == idx)[0][0] + 1 if idx in missing_index else 0 for idx in item]
+        position_NA.append(pos)
+
+    N_miss = len(missing_index)
+    
+    # Observe non-missing values
+    y_obs = list_y[~np.isnan(list_y)]
+    p_mean = np.mean(y_obs)
+
+    # Reproduce JAGS MCMC Bernoulli Sampling Engine
+    np.random.seed(seed)
+    n_chains = 3
+    n_samples = 5000
+    
+    # Draw MCMC Bernoulli samples: y_missing ~ Bernoulli(mean(y_obs))
+    mcmc_samples = np.random.binomial(n=1, p=p_mean, size=(n_chains * n_samples, N_miss))
+
+    # Calculate column means across posterior MCMC chains
+    col_means = mcmc_samples.mean(axis=0)
+
+    # Output array with imputed predictions
+    list_y_imputed = list_y.copy()
+    list_y_imputed[missing_index] = col_means
+
+    return list_y_imputed
