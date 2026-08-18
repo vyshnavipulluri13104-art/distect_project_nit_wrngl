@@ -1,0 +1,87 @@
+import numpy as np
+import pandas as pd
+from scipy.spatial.distance import cdist
+from scipy.special import expit  # Inverse logit (plogis equivalent)
+
+
+def predict(fit, data, sweep=100, seed=128):
+    """
+    Gibbs sampling prediction algorithm for spatial autologistic/Stan model outcomes.
+
+    Parameters
+    ----------
+    fit : dict or object with summary interface
+        A fitted Stan model object. Must contain a summary table/matrix.
+    data : pd.DataFrame or np.ndarray
+        Dataframe containing covariates and 2D spatial coordinates in the last two columns.
+    sweep : int, optional
+        Number of Gibbs sampling iterations (default is 100).
+    seed : int, optional
+        Random seed for reproducible bernoulli sampling.
+
+    Returns
+    -------
+    y_new : np.ndarray
+        Vector of predicted binary outcomes (0 or 1).
+    """
+    np.random.seed(seed)
+
+    # Convert data to pandas DataFrame if numpy array
+    if isinstance(data, np.ndarray):
+        data = pd.DataFrame(data)
+
+    n = len(data)
+    y_new = np.random.choice([0, 1], size=n, replace=True)
+    neighbor_matrix = np.zeros((n, n))
+
+    # Extract coefficients summary
+    if isinstance(fit, dict) and "summary" in fit:
+        coef_summary = fit["summary"]
+    elif hasattr(fit, "summary"):
+        coef_summary = fit.summary()
+        if hasattr(coef_summary, "summary"):  # Handle rstan-like nested object
+            coef_summary = coef_summary.summary
+    else:
+        raise ValueError("Unable to extract summary table from fit object.")
+
+    # Extract 'mean' column
+    if isinstance(coef_summary, pd.DataFrame):
+        coef_est = coef_summary["mean"].values
+    elif isinstance(coef_summary, np.ndarray):
+        coef_est = coef_summary[:, 0]  # First column is assumed 'mean'
+    else:
+        coef_est = np.array(coef_summary)
+
+    P = data.shape[1] - 2
+    beta = coef_est[0:P]
+    eta = coef_est[P]
+
+    # Pre-calculate pairwise Euclidean distances on the last 2 spatial coordinate columns
+    coords = data.iloc[:, -2:].values
+    dist_matrix = cdist(coords, coords, metric="euclidean")
+
+    # Adjacency mask: distance <= 1 and non-self pairs (j != i)
+    adj_mask = (dist_matrix <= 1) & (~np.eye(n, dtype=bool))
+
+    # Features matrix
+    X = data.iloc[:, 0:P].values
+
+    # Pre-calculate linear predictor components for covariates: sum(beta * X[i, :])
+    beta_X = np.dot(X, beta)
+
+    # Perform Gibbs Sampling Sweeps
+    for s in range(sweep):
+        for i in range(n):
+            # Compute spatial neighbor interactions: sum(eta * y_new[j]) for valid neighbors
+            neighbor_matrix[i, :] = np.where(adj_mask[i, :], eta * y_new, 0)
+
+            # Calculate logit probability
+            logit_p = beta_X[i] + np.sum(neighbor_matrix[i, :])
+
+            # Logistic transformation (plogis)
+            p = expit(logit_p)
+
+            # Sample binary outcome (rbinom(1, 1, p))
+            y_new[i] = np.random.binomial(n=1, p=p)
+
+    return y_new
