@@ -1,0 +1,222 @@
+import itertools
+import tempfile
+import numpy as np
+import pandas as pd
+import cmdstanpy
+
+# --- Stan Model Codes (Modern Stan Syntax) ---
+
+DSGD_SINGLE_STAN = """
+data {
+  int<lower=0> N;
+  int<lower=0> P;
+  matrix[N, P+2] x;
+  array[N] int y;
+}
+parameters {
+  vector[P] beta;
+  real<lower=0, upper=8> eta;
+  vector<lower=0>[P] beta_gamma;
+  real<lower=0, upper=1> w;
+}
+model {
+  vector[N] mu;
+  matrix[N, N] prob_neigh;
+
+  for (i in 1:P) {
+    w ~ uniform(0, 1);
+    beta_gamma[i] ~ inv_gamma(5, 50);
+    target += log_sum_exp(
+      log(1 - w) + normal_lpdf(beta[i] | 0, 0.000001 * beta_gamma[i]),
+      log(w) + normal_lpdf(beta[i] | 0, beta_gamma[i])
+    );
+  }
+
+  for (i in 1:N) {
+    for (j in 1:N) {
+      eta ~ uniform(0, 8);
+      if (j != i && sqrt(square(x[i, P+1] - x[j, P+1]) + square(x[i, P+2] - x[j, P+2])) <= 1) {
+        prob_neigh[i, j] = eta * y[j];
+      } else {
+        prob_neigh[i, j] = 0;
+      }
+    }
+    mu[i] = dot_product(x[i, 1:P], beta) + sum(prob_neigh[i, ]);
+  }
+  y ~ bernoulli_logit(mu);
+}
+"""
+
+DSGD_MULTIPLE_STAN = """
+data {
+  int<lower=0> N;
+  int<lower=0> P;
+  int<lower=0> S;
+  matrix[N, P+2] x;
+  array[N] int y;
+  vector[S] u_mu;
+  array[N] int label;
+}
+parameters {
+  vector[P] beta;
+  real<lower=0, upper=8> eta;
+  vector<lower=0>[P] beta_gamma;
+  real<lower=0, upper=1> w;
+  vector<lower=-1, upper=1>[S] U;
+  real<lower=0, upper=1> sigma_square;
+  real<lower=0, upper=1> rho;
+}
+model {
+  vector[N] mu;
+  matrix[N, N] prob_neigh;
+  matrix[S, S] covar_matrix;
+
+  rho ~ uniform(0, 1);
+  sigma_square ~ inv_gamma(5, 50);
+
+  for (i in 1:S) {
+    for (j in 1:S) {
+      if (i == j) {
+        covar_matrix[i, j] = sigma_square;
+      } else {
+        covar_matrix[i, j] = sigma_square * rho;
+      }
+    }
+  }
+
+  U ~ multi_normal(u_mu, covar_matrix);
+
+  for (i in 1:P) {
+    w ~ uniform(0, 1);
+    beta_gamma[i] ~ inv_gamma(5, 50);
+    target += log_sum_exp(
+      log(1 - w) + normal_lpdf(beta[i] | 0, 0.000001 * beta_gamma[i]),
+      log(w) + normal_lpdf(beta[i] | 0, beta_gamma[i])
+    );
+  }
+
+  for (i in 1:N) {
+    for (j in 1:N) {
+      eta ~ uniform(0, 8);
+      if (label[i] == label[j] && j != i && sqrt(square(x[i, P+1] - x[j, P+1]) + square(x[i, P+2] - x[j, P+2])) <= 1) {
+        prob_neigh[i, j] = eta * y[j];
+      } else {
+        prob_neigh[i, j] = 0;
+      }
+    }
+    mu[i] = dot_product(x[i, 1:P], beta) + sum(prob_neigh[i, ]) + U[label[i]];
+  }
+  y ~ bernoulli_logit(mu);
+}
+"""
+
+# --- Python Functions ---
+
+def add_interaction(matrix_x, interaction):
+    """
+    Creates all unique two-way combinations of specified interaction terms 
+    and inserts them before the final two coordinate columns.
+    """
+    if isinstance(matrix_x, np.ndarray):
+        cols = [f"V{i+1}" for i in range(matrix_x.shape[1])]
+        x_df = pd.DataFrame(matrix_x, columns=cols)
+    else:
+        x_df = matrix_x.copy()
+
+    coord_cols = x_df.columns[-2:].tolist()
+    x_df_no_coords = x_df.iloc[:, :-2].copy()
+
+    if not all(var in x_df_no_coords.columns for var in interaction):
+        raise ValueError("Error: Some variables do not exist.")
+
+    # Generate pairs matching R's combn(interaction, 2)
+    interaction_pairs = list(itertools.combinations(interaction, 2))
+
+    for col1, col2 in interaction_pairs:
+        col_name = f"{col1}*{col2}"
+        x_df_no_coords[col_name] = x_df_no_coords[col1] * x_df_no_coords[col2]
+
+    x_df_final = pd.concat([x_df_no_coords, x_df[coord_cols]], axis=1)
+    return x_df_final.to_numpy() if isinstance(matrix_x, np.ndarray) else x_df_final
+
+
+def dsgd_single(list_y, matrix_x, method="VI", niter=2000, nwarmup=1000, nchain=3, seed=128):
+    """Fits single tissue DSGD model."""
+    x_mat = matrix_x.to_numpy() if isinstance(matrix_x, pd.DataFrame) else matrix_x
+    
+    stan_data = {
+        "N": x_mat.shape[0],
+        "P": x_mat.shape[1] - 2,
+        "x": x_mat,
+        "y": [int(val) for val in list_y]
+    }
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".stan", delete=False) as f:
+        f.write(DSGD_SINGLE_STAN)
+        model_path = f.name
+
+    model = cmdstanpy.CmdStanModel(stan_file=model_path)
+
+    if method == "VI":
+        fit = model.variational(data=stan_data, seed=seed, tol_rel_obj=0.00001)
+    elif method == "NUTS":
+        fit = model.sample(
+            data=stan_data,
+            iter_sampling=niter - nwarmup,
+            iter_warmup=nwarmup,
+            chains=nchain,
+            seed=seed
+        )
+    return fit
+
+
+def dsgd_multiple(list_y, matrix_x, label_list, method="VI", niter=2000, nwarmup=1000, nchain=3, seed=128):
+    """Fits multi-tissue correlated DSGD model."""
+    x_mat = matrix_x.to_numpy() if isinstance(matrix_x, pd.DataFrame) else matrix_x
+    
+    unique_labels = list(dict.fromkeys(label_list))
+    label_map = {lbl: idx + 1 for idx, lbl in enumerate(unique_labels)}
+    numeric_labels = [label_map[lbl] for lbl in label_list]
+    num_unique = len(unique_labels)
+
+    stan_data = {
+        "N": x_mat.shape[0],
+        "P": x_mat.shape[1] - 2,
+        "S": num_unique,
+        "x": x_mat,
+        "y": [int(val) for val in list_y],
+        "label": numeric_labels,
+        "u_mu": [0.0] * num_unique
+    }
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".stan", delete=False) as f:
+        f.write(DSGD_MULTIPLE_STAN)
+        model_path = f.name
+
+    model = cmdstanpy.CmdStanModel(stan_file=model_path)
+
+    if method == "VI":
+        fit = model.variational(data=stan_data, seed=seed, tol_rel_obj=0.00001)
+    elif method == "NUTS":
+        fit = model.sample(
+            data=stan_data,
+            iter_sampling=niter - nwarmup,
+            iter_warmup=nwarmup,
+            chains=nchain,
+            seed=seed
+        )
+    return fit
+
+
+def dsgd(list_y, matrix_x, label_list=None, interaction=None, method="VI", niter=2000, nwarmup=1000, nchain=3, seed=128):
+    """Main wrapper function."""
+    if interaction is not None:
+        matrix_x = add_interaction(matrix_x, interaction)
+
+    if method not in ["VI", "NUTS"]:
+        raise ValueError("Error: method must be either 'VI' or 'NUTS'")
+
+    if label_list is None:
+        return dsgd_single(list_y, matrix_x, method=method, niter=niter, nwarmup=nwarmup, nchain=nchain, seed=seed)
+    else:
+        return dsgd_multiple(list_y, matrix_x, label_list, method=method, niter=niter, nwarmup=nwarmup, nchain=nchain, seed=seed)
