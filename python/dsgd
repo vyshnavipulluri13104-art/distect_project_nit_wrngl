@@ -8,16 +8,16 @@ import cmdstanpy
 
 DSGD_SINGLE_STAN = """
 data {
-  int<lower=0> N;
-  int<lower=0> P;
-  matrix[N, P+2] x;
-  array[N] int y;
+  int<lower=0> N;   # number of spatial spots
+  int<lower=0> P;   # number of gene expression features 
+  matrix[N, P+2] x;  # x:matrix of size N x (P+2) and p is gene expression and 2 are spatial coordinates (x,y)
+  array[N] int y;  # binary target vector (1 for diseased and 0 for healthy)
 }
 parameters {
-  vector[P] beta;
-  real<lower=0, upper=8> eta;
-  vector<lower=0>[P] beta_gamma;
-  real<lower=0, upper=1> w;
+  vector[P] beta;  # beta is weights for gene expresion
+  real<lower=0, upper=8> eta; # eta for spatial expression
+  vector<lower=0>[P] beta_gamma;   
+  real<lower=0, upper=1> w;  # beta_gamma and w variable selection and regularisation
 }
 model {
   vector[N] mu;
@@ -26,7 +26,7 @@ model {
   for (i in 1:P) {
     w ~ uniform(0, 1);
     beta_gamma[i] ~ inv_gamma(5, 50);
-    target += log_sum_exp(
+    target += log_sum_exp(   # uses mixture distribution o perform variable selection
       log(1 - w) + normal_lpdf(beta[i] | 0, 0.000001 * beta_gamma[i]),
       log(w) + normal_lpdf(beta[i] | 0, beta_gamma[i])
     );
@@ -36,26 +36,26 @@ model {
     for (j in 1:N) {
       eta ~ uniform(0, 8);
       if (j != i && sqrt(square(x[i, P+1] - x[j, P+1]) + square(x[i, P+2] - x[j, P+2])) <= 1) {
-        prob_neigh[i, j] = eta * y[j];
+        prob_neigh[i, j] = eta * y[j];   # spatial neighbour calculation
       } else {
         prob_neigh[i, j] = 0;
       }
     }
-    mu[i] = dot_product(x[i, 1:P], beta) + sum(prob_neigh[i, ]);
+    mu[i] = dot_product(x[i, 1:P], beta) + sum(prob_neigh[i, ]);  # mu linear predictor
   }
-  y ~ bernoulli_logit(mu);
+  y ~ bernoulli_logit(mu);  
 }
 """
 
 DSGD_MULTIPLE_STAN = """
 data {
-  int<lower=0> N;
-  int<lower=0> P;
-  int<lower=0> S;
-  matrix[N, P+2] x;
-  array[N] int y;
+  int<lower=0> N;    # number of spatial spots
+  int<lower=0> P;     # number of gene expression features 
+  int<lower=0> S;    # number of distict tissue slides
+  matrix[N, P+2] x;    # x:matrix of size N x (P+2) and p is gene expression and 2 are spatial coordinates (x,y)
+  array[N] int y;   # binary target vector (1 for diseased and 0 for healthy)
   vector[S] u_mu;
-  array[N] int label;
+  array[N] int label;   # Vector mapping each spot i to its corresponding tissue slice ID (1 to S).
 }
 parameters {
   vector[P] beta;
@@ -69,7 +69,7 @@ parameters {
 model {
   vector[N] mu;
   matrix[N, N] prob_neigh;
-  matrix[S, S] covar_matrix;
+  matrix[S, S] covar_matrix;  # Inter-tissue covariance matrix defined by variance $\sigma^2$ and correlation $\rho$
 
   rho ~ uniform(0, 1);
   sigma_square ~ inv_gamma(5, 50);
