@@ -1,82 +1,215 @@
-import re
-import numpy as np
-import pandas as pd
-from plotnine import (
-    ggplot, aes, geom_hline, geom_point, geom_errorbar,
-    theme_minimal, theme_bw, labs, theme, element_text, element_blank
-)
+import re   # used for pattern matching
+import numpy as np   # used for numerical    
+import pandas as pd  # used for creating and handling tables
+from plotnine import (              # import plotting functions
+ggplot,                             # Creates the basic plot
+    aes,                            # Defines x-axis and y-axis
+    geom_hline,                     # Adds a horizontal line
+    geom_point,                     # Adds points
+    geom_errorbar,                  # Adds error bars
+    theme_minimal,                  # Minimal plot theme
+    theme_bw,                       # Black-and-white theme
+    labs,                           # Adds axis labels
+    theme,                          # Changes plot appearance
+    element_text,                   # Changes text appearance
+    element_blank                   # Removes an element
+)   
+
 
 # --- 1. Python implementation ---
-def plot_coef(fit, matrix_x, n=30):
-    # Standardized extraction for summary table
-    summary_df = fit['summary']
-    
-    beta_rows = [name for name in summary_df.index if re.match(r"^beta\[", str(name))]
-    beta_data = summary_df.loc[beta_rows]
-    
+
+# Function to create coefficient plot
+def plot_coef(fit, matrix_x, n=30):       # fit=model, matrix_x=data, n=number of genes
+
+    summary_df = fit['summary']            # Get model summary table
+
+    # Find rows whose names start with "beta["
+    beta_rows = [
+        name for name in summary_df.index
+        if re.match(r"^beta\[", str(name))
+    ]
+
+    beta_data = summary_df.loc[beta_rows]  # Select only beta rows
+
+    # Check whether matrix_x is a Pandas DataFrame
     if isinstance(matrix_x, pd.DataFrame):
+
+        # Get all column names except the last 2
         gene_names = matrix_x.columns[:-2].tolist()
+
     else:
-        gene_names = [f"Gene_{i+1}" for i in range(matrix_x.shape[1] - 2)]
-        
+
+        # Create gene names automatically if matrix_x is not a DataFrame
+        gene_names = [
+            f"Gene_{i+1}"
+            for i in range(matrix_x.shape[1] - 2)
+        ]
+
+    # Create a new table containing gene, coefficient and SD
     plot_data = pd.DataFrame({
-        "gene": gene_names,
-        "coef": beta_data["mean"].values,
-        "sd": beta_data["sd"].values
+        "gene": gene_names,                  # Gene names
+        "coef": beta_data["mean"].values,    # Mean coefficient
+        "sd": beta_data["sd"].values         # Standard deviation
     })
-    
-    plot_data["error"] = (plot_data["coef"] / plot_data["sd"]).abs()
+
+    # Calculate absolute coefficient / SD
+    plot_data["error"] = (
+        plot_data["coef"] / plot_data["sd"]
+    ).abs()
+
+    # Calculate absolute value of coefficient
     plot_data["abs_effect"] = plot_data["coef"].abs()
-    
+
+    # Sort genes by largest absolute effect and select top n
     plot_data = (
         plot_data
-        .sort_values(by="abs_effect", ascending=False)
-        .head(n)
-        .copy()
+        .sort_values(
+            by="abs_effect",                 # Sort using absolute effect
+            ascending=False                  # Largest value first
+        )
+        .head(n)                             # Keep first n genes
+        .copy()                              # Make a copy of the table
     )
-    
-    # Preserve exact factor levels matching R's plot_data$gene[order(-plot_data$abs_effect)]
-    gene_order = plot_data.sort_values(by="abs_effect", ascending=False)["gene"].tolist()
-    plot_data["gene"] = pd.Categorical(plot_data["gene"], categories=gene_order, ordered=True)
-    
+
+    # Get gene names in sorted order
+    gene_order = (
+        plot_data
+        .sort_values(
+            by="abs_effect",
+            ascending=False
+        )["gene"]                             # Select gene column
+        .tolist()                             # Convert to Python list
+    )
+
+    # Make gene names ordered categorical values
+    plot_data["gene"] = pd.Categorical(
+        plot_data["gene"],                   # Gene column
+        categories=gene_order,               # Required order
+        ordered=True                         # Tell Pandas order matters
+    )
+
+    # Create the coefficient plot
     plot = (
-        ggplot(plot_data, aes(x="gene", y="coef"))
-        + geom_hline(yintercept=0, linetype="dashed", color="grey60")
-        + geom_point()
-        + geom_errorbar(
-            aes(ymin="coef - error", ymax="coef + error"),
-            width=0.2,
-            size=1.5
+        ggplot(
+            plot_data,                       # Data used for plot
+            aes(
+                x="gene",                    # Gene on X-axis
+                y="coef"                     # Coefficient on Y-axis
+            )
         )
-        + theme_minimal()
-        + theme_bw()
-        + labs(x="Gene Names", y="Coefficient Values")
+
+        # Add horizontal line at coefficient = 0
+        + geom_hline(
+            yintercept=0,                    # Position of line
+            linetype="dashed",               # Dashed line
+            color="grey60"                   # Grey color
+        )
+
+        + geom_point()                       # Draw coefficient points
+
+        # Add error bars
+        + geom_errorbar(
+            aes(
+                ymin="coef - error",         # Lower end of error bar
+                ymax="coef + error"          # Upper end of error bar
+            ),
+            width=0.2,                       # Width of error bar
+            size=1.5                         # Thickness of error bar
+        )
+
+        + theme_minimal()                    # Apply minimal theme
+
+        + theme_bw()                         # Apply black-and-white theme
+
+        + labs(
+            x="Gene Names",                  # X-axis label
+            y="Coefficient Values"           # Y-axis label
+        )
+
         + theme(
-            axis_text_x=element_text(angle=45, hjust=1),
-            axis_ticks_y=element_blank()
+            axis_text_x=element_text(
+                angle=45,                    # Rotate gene names 45 degrees
+                hjust=1                      # Align text
+            ),
+
+            axis_ticks_y=element_blank()    # Remove Y-axis tick marks
         )
     )
-    
-    return plot, plot_data
 
-# --- 2. Create Mock Data ---
-np.random.seed(42)
-num_genes = 50
-n_samples = 100
+    return plot, plot_data                  # Return plot and data table
 
-# Create DataFrame matching R's matrix_x structure
-genes = [f"Gene_{i+1}" for i in range(num_genes)]
+
+# CREATE MOCK DATA
+
+
+np.random.seed(42)                          # Make random values reproducible
+
+num_genes = 50                              # Number of genes
+n_samples = 100                             # Number of samples
+
+# Create names Gene_1 to Gene_50
+genes = [
+    f"Gene_{i+1}"
+    for i in range(num_genes)
+]
+
+# Add two additional columns
 cols = genes + ["coord_x", "coord_y"]
-matrix_x = pd.DataFrame(np.random.randn(n_samples, num_genes + 2), columns=cols)
 
-# Create Mock fit summary matching Stan output
-index_names = [f"beta[{i+1}]" for i in range(num_genes)]
-means = np.random.normal(loc=0, scale=2, size=num_genes)
-sds = np.random.uniform(low=0.1, high=0.5, size=num_genes)
+# Create random data with 100 rows and 52 columns
+matrix_x = pd.DataFrame(
+    np.random.randn(
+        n_samples,                           # 100 rows
+        num_genes + 2                        # 50 genes + 2 coordinates
+    ),
+    columns=cols                             # Assign column names
+)
 
-mock_summary_df = pd.DataFrame({"mean": means, "sd": sds}, index=index_names)
-mock_fit = {"summary": mock_summary_df}
 
-# --- 3. Execute ---
-p_py, df_out = plot_coef(fit=mock_fit, matrix_x=matrix_x, n=5)
+# CREATE MOCK MODEL SUMMARY
+
+# Create beta names: beta[1], beta[2], ..., beta[50]
+index_names = [
+    f"beta[{i+1}]"
+    for i in range(num_genes)
+]
+
+# Generate 50 random coefficient means
+means = np.random.normal(
+    loc=0,                                   # Mean = 0
+    scale=2,                                 # Standard deviation = 2
+    size=num_genes                           # Generate 50 values
+)
+
+# Generate 50 random SD values between 0.1 and 0.5
+sds = np.random.uniform(
+    low=0.1,                                 # Minimum SD
+    high=0.5,                                # Maximum SD
+    size=num_genes                           # Generate 50 values
+)
+
+# Create model summary DataFrame
+mock_summary_df = pd.DataFrame(
+    {
+        "mean": means,                       # Coefficient means
+        "sd": sds                            # Standard deviations
+    },
+    index=index_names                        # beta[1] ... beta[50]
+)
+
+# Create a dictionary representing the fitted model
+mock_fit = {
+    "summary": mock_summary_df              # Store summary table
+}
+
+# EXECUTE FUNCTION
+
+# Call the function and get the plot and output table
+p_py, df_out = plot_coef(
+    fit=mock_fit,                            # Pass model
+    matrix_x=matrix_x,                       # Pass gene data
+    n=5                                      # Select top 5 genes
+)
+
+# Print the final top-5 gene table
 print(df_out)
