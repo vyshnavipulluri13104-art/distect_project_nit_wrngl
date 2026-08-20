@@ -21,12 +21,12 @@ parameters {
 }
 model {
   vector[N] mu;
-  matrix[N, N] prob_neigh;
+  matrix[N, N] prob_neigh;     # spatial neighbour calculation
 
   for (i in 1:P) {
     w ~ uniform(0, 1);
     beta_gamma[i] ~ inv_gamma(5, 50);
-    target += log_sum_exp(   # uses mixture distribution o perform variable selection
+    target += log_sum_exp(   # uses mixture distribution o perform variable selection(spike and slab)
       log(1 - w) + normal_lpdf(beta[i] | 0, 0.000001 * beta_gamma[i]),
       log(w) + normal_lpdf(beta[i] | 0, beta_gamma[i])
     );
@@ -36,7 +36,7 @@ model {
     for (j in 1:N) {
       eta ~ uniform(0, 8);
       if (j != i && sqrt(square(x[i, P+1] - x[j, P+1]) + square(x[i, P+2] - x[j, P+2])) <= 1) {
-        prob_neigh[i, j] = eta * y[j];   # spatial neighbour calculation
+        prob_neigh[i, j] = eta * y[j];  
       } else {
         prob_neigh[i, j] = 0;
       }
@@ -112,7 +112,7 @@ model {
 
 # --- Python Functions ---
 
-def add_interaction(matrix_x, interaction):
+def add_interaction(matrix_x, interaction):  # 2 way multiplicative interaction between selected genes, whilw maintaining spatial matrix
     """
     Creates all unique two-way combinations of specified interaction terms 
     and inserts them before the final two coordinate columns.
@@ -124,19 +124,19 @@ def add_interaction(matrix_x, interaction):
         x_df = matrix_x.copy()
 
     coord_cols = x_df.columns[-2:].tolist()
-    x_df_no_coords = x_df.iloc[:, :-2].copy()
+    x_df_no_coords = x_df.iloc[:, :-2].copy()    # extracs the last 2 columns (spatial  x,y coordinates) and preserves the remaining gene expression column
 
     if not all(var in x_df_no_coords.columns for var in interaction):
         raise ValueError("Error: Some variables do not exist.")
 
     # Generate pairs matching R's combn(interaction, 2)
-    interaction_pairs = list(itertools.combinations(interaction, 2))
+    interaction_pairs = list(itertools.combinations(interaction, 2))   # pairwise enumeration ((gene1, gene2); (gene2, gene3); (gene1, gene3)), avoids redundancy
 
     for col1, col2 in interaction_pairs:
-        col_name = f"{col1}*{col2}"
-        x_df_no_coords[col_name] = x_df_no_coords[col1] * x_df_no_coords[col2]
+        col_name = f"{col1}*{col2}"  # (valuei = xi,gene1 x xi,gene2)
+        x_df_no_coords[col_name] = x_df_no_coords[col1] * x_df_no_coords[col2]  # element wise multiplication, computes new feature values row by row
 
-    x_df_final = pd.concat([x_df_no_coords, x_df[coord_cols]], axis=1)
+    x_df_final = pd.concat([x_df_no_coords, x_df[coord_cols]], axis=1) # preserves spatial order
     return x_df_final.to_numpy() if isinstance(matrix_x, np.ndarray) else x_df_final
 
 
@@ -155,11 +155,11 @@ def dsgd_single(list_y, matrix_x, method="VI", niter=2000, nwarmup=1000, nchain=
         f.write(DSGD_SINGLE_STAN)
         model_path = f.name
 
-    model = cmdstanpy.CmdStanModel(stan_file=model_path)
+    model = cmdstanpy.CmdStanModel(stan_file=model_path)   compiles and executes via cmdstanpy.CmdStanModel
 
-    if method == "VI":
+    if method == "VI":   # runs either variational interface for seed
         fit = model.variational(data=stan_data, seed=seed, tol_rel_obj=0.00001)
-    elif method == "NUTS":
+    elif method == "NUTS":   # NUTSMCMC for exact posterier sampling
         fit = model.sample(
             data=stan_data,
             iter_sampling=niter - nwarmup,
@@ -211,10 +211,10 @@ def dsgd_multiple(list_y, matrix_x, label_list, method="VI", niter=2000, nwarmup
 def dsgd(list_y, matrix_x, label_list=None, interaction=None, method="VI", niter=2000, nwarmup=1000, nchain=3, seed=128):
     """Main wrapper function."""
     if interaction is not None:
-        matrix_x = add_interaction(matrix_x, interaction)
+        matrix_x = add_interaction(matrix_x, interaction)  # interation features are provided
 
     if method not in ["VI", "NUTS"]:
-        raise ValueError("Error: method must be either 'VI' or 'NUTS'")
+        raise ValueError("Error: method must be either 'VI' or 'NUTS'")  
 
     if label_list is None:
         return dsgd_single(list_y, matrix_x, method=method, niter=niter, nwarmup=nwarmup, nchain=nchain, seed=seed)
