@@ -19,19 +19,20 @@ import torch.optim as optim
 
 # APPROACH 1: Graph Attention Networks (GAT-Spatial)
 # Dynamic spatial affinity learning replacing rigid distance thresholds.
+# instead of saying all neighbours important, neighbour A is most important
 
 class GATSpatialPredictor(nn.Module):
-    def __init__(self, in_features, hidden_dim=32, heads=4):
+    def __init__(self, in_features, hidden_dim=32, heads=4): # n0. of gene, no. of hidden representation, 4 attention heads
         super().__init__()
-        self.fc = nn.Linear(in_features, hidden_dim * heads)
-        self.att = nn.Parameter(torch.randn(1, heads, 2 * hidden_dim))
-        self.out = nn.Linear(hidden_dim * heads, 1)
+        self.fc = nn.Linear(in_features, hidden_dim * heads)   
+        self.att = nn.Parameter(torch.randn(1, heads, 2 * hidden_dim))  # gene to hidden representation
+        self.out = nn.Linear(hidden_dim * heads, 1)  #converts final representation into 1 prediction
 
     def forward(self, X, coords, adj_mask):
         N = X.shape[0]
-        h = self.fc(X).view(N, 4, -1)  # Shape: [N, heads, hidden_dim]
+        h = self.fc(X).view(N, 4, -1)  # Shape: [N, heads, hidden_dim]  # transports every spot into four attention head representations 
         
-        edge_src, edge_dst = torch.where(adj_mask)
+        edge_src, edge_dst = torch.where(adj_mask)  # finds spatial location connected
         h_src, h_dst = h[edge_src], h[edge_dst]
         cat_h = torch.cat([h_src, h_dst], dim=-1)
         scores = F.leaky_relu((cat_h * self.att).sum(dim=-1))
@@ -44,6 +45,7 @@ class GATSpatialPredictor(nn.Module):
 
 # APPROACH 2: Hierarchical Horseshoe Prior Shrinkage
 # Dynamic feature sparsification for high-dimensional gene spaces.
+# bayesian variable-selecion method (only useful genes are taklen)
 
 def horseshoe_gibbs_impute(X, y_obs, n_samples=500):
     N, P = X.shape
@@ -69,6 +71,8 @@ def horseshoe_gibbs_impute(X, y_obs, n_samples=500):
 
 # APPROACH 3: Stochastic Variational Inference (SVI)
 # Evidence Lower Bound (ELBO) optimization for massive spatial datasets.
+# estimate unkown model parameters efficienty ( no exact value for beta so i'll represent it as probability distribution)
+# efficiently approximates bayesian parameter distributions for large datasets
 
 def svi_spatial_fit(X, coords, y, epochs=200):
     N, P = X.shape
@@ -98,6 +102,7 @@ def svi_spatial_fit(X, coords, y, epochs=200):
 
 # APPROACH 4: Gaussian Process Spatial Kernel Modeling
 # Smooth non-linear tissue gradient modeling via Squared Exponential kernels.
+# uses spatial similarity to make smooth predictions for near by locations
 
 def gp_spatial_predict(coords, y_obs, length_scale=1.5, noise=0.01):
     N = len(coords)
@@ -118,6 +123,7 @@ def gp_spatial_predict(coords, y_obs, length_scale=1.5, noise=0.01):
 
 # APPROACH 5: Zero-Inflated Negative Binomial (ZINB) Likelihood Engine
 # Generative modeling for un-binarized, raw RNA sequencing read counts.
+# models RNA-sequencing count data that contains many zeros
 
 class ZINBLayer(nn.Module):
     def __init__(self, in_dim, out_dim):
@@ -143,6 +149,7 @@ def zinb_loss(x, mean, disp, pi, eps=1e-10):
 
 # APPROACH 6: Cell-Type Deconvolution Integration
 # Deconvolution framework eliminating density-driven false positive genes.
+# estimates the proportions of different cell types within each spatial spot
 
 def deconvolve_and_predict(gene_expression, cell_signatures, y_obs):
     N, P = gene_expression.shape
@@ -165,6 +172,7 @@ def deconvolve_and_predict(gene_expression, cell_signatures, y_obs):
 
 # APPROACH 7: Hypergraph Neural Interaction Modeling
 # Captures multi-gene pathway complexes (3+ genes) using hyperedges.
+# captures iterations among group of multiple gene or biological pathways
 
 class HypergraphSpatialConv(nn.Module):
     def __init__(self, in_features, out_features):
@@ -185,6 +193,7 @@ class HypergraphSpatialConv(nn.Module):
 
 # APPROACH 8: Deep Kernel Variational Autoencoder (DK-VAE)
 # Learns non-linear spatial latent embeddings for tissue domain prediction.
+# learns a compact nonlinear representation of high dimensional gene expression data
 
 class DKVAE(nn.Module):
     def __init__(self, gene_dim, latent_dim=16):
@@ -210,6 +219,7 @@ class DKVAE(nn.Module):
 
 # APPROACH 9: Continuous Spatial Optimal Transport (OT)
 # Optimal transport alignment across shifted or non-adjacent tissue slices.
+# aligns and ransfers info between different spatial tissue regiona and slices
 
 def ot_spatial_imputation(source_coords, target_coords, y_source, reg=0.1):
     M = scipy.spatial.distance.cdist(source_coords, target_coords, metric='sqeuclidean')
@@ -230,6 +240,7 @@ def ot_spatial_imputation(source_coords, target_coords, y_source, reg=0.1):
 
 # APPROACH 10: Graph Convolutional Markov Random Fields (GCN-MRF)
 # Combines representation learning with Conditional Random Field potentials.
+# combines neural network with spatial smoothness to improve predictions
 
 class GCN_MRF(nn.Module):
     def __init__(self, in_features):
@@ -248,6 +259,7 @@ class GCN_MRF(nn.Module):
 
 # APPROACH 11: Multi-Slice 3D Tensor Alignment
 # Extends analysis to 3D coordinate tensors across multiple tissue sections.
+# uses info from multiple tissues slices and their 3D coordinates
 
 def multi_slice_3d_impute(X_list, coords_3d_list, y_list):
     all_X = np.vstack(X_list)
@@ -273,6 +285,7 @@ def multi_slice_3d_impute(X_list, coords_3d_list, y_list):
 
 # APPROACH 12: Normalizing Flows for Posterior Density Estimation
 # Exact posterior distribution inference using invertible planar transformations.
+# learns complex probability distributions for better uncertainity modeling
 
 class PlanarFlow(nn.Module):
     def __init__(self, dim):
@@ -300,7 +313,8 @@ class FlowPosterior(nn.Module):
 
 # APPROACH 13: Spike-and-Slab Bayesian Variable Selection
 # Exact zero-coefficient variable selection using discrete mixture priors.
-]
+# selects importan gene and removes the unimportant gene
+
 def spike_and_slab_impute(X, y_obs, n_iter=200):
     N, P = X.shape
     beta = np.zeros(P)
@@ -325,6 +339,7 @@ def spike_and_slab_impute(X, y_obs, n_iter=200):
 
 # APPROACH 14: Contrastive Spatial Learning (InfoNCE)
 # Unsupervised spatial feature extraction robust to batch effects across slides.
+# learns similar representation for spatially related locations
 
 class SpatialInfoNCE(nn.Module):
     def __init__(self, in_features, proj_dim=32, temperature=0.07):
@@ -346,6 +361,7 @@ class SpatialInfoNCE(nn.Module):
 
 # APPROACH 15: Conformalized Spatial Uncertainty Bounds
 # Distribution-free statistical confidence bounds for spatial predictions.
+# provides prediction intervsls showing the uncertainity around spatial related locations
 
 def conformal_spatial_bounds(y_true_val, y_pred_val, y_pred_test, alpha=0.05):
     residuals = np.abs(y_true_val - y_pred_val)
